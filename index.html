@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SQLite Studio Client</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Fonts: JetBrains Mono & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons: Lucide -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- SQL.js (WASM) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bg: '#212121',
+                        surface: '#2B2B2B',
+                        surfaceHighlight: '#323232',
+                        border: '#404040',
+                        primary: '#7C3AED', // Violet
+                        primaryHover: '#6D28D9',
+                        textMain: '#E5E5E5',
+                        textMuted: '#A3A3A3',
+                        accent: '#10B981', // Emerald
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #212121;
+            color: #E5E5E5;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #212121; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #404040; 
+            border-radius: 5px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #505050; 
+        }
+
+        /* Editor Styling */
+        .code-editor {
+            background-color: #1a1a1a;
+            color: #a9b7c6;
+            caret-color: #fff;
+            outline: none;
+            resize: none;
+            line-height: 1.6;
+        }
+
+        /* Table Styling */
+        .sql-table th {
+            position: sticky;
+            top: 0;
+            background-color: #323232;
+            z-index: 10;
+        }
+        
+        .sql-table tbody tr:hover {
+            background-color: #323232;
+        }
+
+        /* Loading Spinner */
+        .loader {
+            border: 3px solid #333;
+            border-top: 3px solid #7C3AED;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col overflow-hidden font-sans text-sm">
+
+    <!-- Header -->
+    <header class="h-14 bg-surface border-b border-border flex items-center justify-between px-4 shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="bg-primary/20 p-2 rounded-lg">
+                <i data-lucide="database" class="w-5 h-5 text-primary"></i>
+            </div>
+            <h1 class="font-semibold text-lg tracking-tight">SQLite <span class="text-textMuted font-normal">Client</span></h1>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <div id="loadingIndicator" class="hidden flex items-center gap-2 text-textMuted text-xs mr-4">
+                <div class="loader"></div>
+                <span>Processando...</span>
+            </div>
+            
+            <input type="file" id="dbFileInput" class="hidden" accept=".sqlite,.db,.sqlite3,.sql">
+            <button onclick="document.getElementById('dbFileInput').click()" 
+                class="flex items-center gap-2 px-3 py-1.5 bg-surfaceHighlight hover:bg-border rounded-md transition-colors border border-border text-xs font-medium">
+                <i data-lucide="upload" class="w-4 h-4"></i> Carregar Arquivo
+            </button>
+            
+            <button onclick="createDemoDB()" 
+                class="flex items-center gap-2 px-3 py-1.5 bg-surfaceHighlight hover:bg-border rounded-md transition-colors border border-border text-xs font-medium text-accent">
+                <i data-lucide="zap" class="w-4 h-4"></i> Criar Demo
+            </button>
+            
+            <button onclick="exportDB()" 
+                class="flex items-center gap-2 px-3 py-1.5 bg-primary hover:bg-primaryHover text-white rounded-md transition-colors text-xs font-medium shadow-lg shadow-primary/20">
+                <i data-lucide="download" class="w-4 h-4"></i> Exportar
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex overflow-hidden">
+        
+        <!-- Sidebar: Tables -->
+        <aside class="w-64 bg-surface border-r border-border flex flex-col shrink-0">
+            <div class="p-4 border-b border-border">
+                <h2 class="text-xs font-bold text-textMuted uppercase tracking-wider mb-2">Tabelas</h2>
+                <div class="relative">
+                    <i data-lucide="search" class="absolute left-2.5 top-2 w-3.5 h-3.5 text-textMuted"></i>
+                    <input type="text" id="tableSearch" placeholder="Filtrar..." 
+                        class="w-full bg-bg border border-border rounded-md py-1.5 pl-8 pr-3 text-xs focus:border-primary focus:outline-none placeholder-textMuted/50">
+                </div>
+            </div>
+            
+            <div id="tableList" class="flex-1 overflow-y-auto p-2 space-y-1">
+                <!-- Tables will be injected here -->
+                <div class="text-center text-textMuted p-4 italic text-xs mt-10">
+                    Nenhum banco carregado.
+                </div>
+            </div>
+
+            <div class="p-3 border-t border-border text-xs text-textMuted flex justify-between">
+                <span>Versão SQLite:</span>
+                <span id="sqliteVersion">...</span>
+            </div>
+        </aside>
+
+        <!-- Main Area -->
+        <main class="flex-1 flex flex-col min-w-0 bg-bg">
+            
+            <!-- Query Editor -->
+            <div class="h-1/3 min-h-[150px] flex flex-col border-b border-border">
+                <div class="h-9 bg-surface border-b border-border flex items-center justify-between px-3">
+                    <span class="text-xs font-medium text-textMuted flex items-center gap-2">
+                        <i data-lucide="code-2" class="w-3.5 h-3.5"></i> Editor SQL
+                    </span>
+                    <div class="flex gap-2">
+                         <button onclick="clearEditor()" class="text-xs text-textMuted hover:text-white transition-colors">Limpar</button>
+                    </div>
+                </div>
+                <div class="flex-1 relative">
+                    <textarea id="sqlEditor" 
+                        class="code-editor w-full h-full p-4 font-mono text-sm border-none focus:ring-0" 
+                        placeholder="-- Digite sua query SQL aqui...&#10;SELECT * FROM sqlite_master;" 
+                        spellcheck="false"></textarea>
+                    
+                    <button onclick="runQuery()" 
+                        class="absolute bottom-4 right-4 bg-primary hover:bg-primaryHover text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 transition-all hover:scale-105 active:scale-95 group">
+                        <i data-lucide="play" class="w-4 h-4 fill-current group-hover:translate-x-0.5 transition-transform"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Results Area -->
+            <div class="flex-1 flex flex-col overflow-hidden">
+                <div class="h-9 bg-surface border-b border-border flex items-center justify-between px-3 shrink-0">
+                    <div class="flex items-center gap-4">
+                        <span class="text-xs font-medium text-textMuted flex items-center gap-2">
+                            <i data-lucide="table" class="w-3.5 h-3.5"></i> Resultados
+                        </span>
+                        <span id="queryStats" class="text-xs text-accent"></span>
+                        <span id="errorMsg" class="text-xs text-red-400 hidden"></span>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="exportCSV()" class="text-xs text-textMuted hover:text-white transition-colors flex items-center gap-1">
+                            <i data-lucide="file-spreadsheet" class="w-3 h-3"></i> CSV
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex-1 overflow-auto bg-bg" id="resultContainer">
+                    <!-- Results Table will appear here -->
+                    <div class="h-full flex flex-col items-center justify-center text-textMuted opacity-50 select-none">
+                        <i data-lucide="database" class="w-16 h-16 mb-4 stroke-1"></i>
+                        <p>Carregue um arquivo ou execute uma query para ver resultados.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- Globals ---
+        let db = null;
+        let SQL = null;
+        const editor = document.getElementById('sqlEditor');
+        const fileInput = document.getElementById('dbFileInput');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', async () => {
+            lucide.createIcons();
+            
+            // Init SQL.js with CDN location for WASM
+            try {
+                const config = {
+                    locateFile: filename => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${filename}`
+                }
+                SQL = await initSqlJs(config);
+                document.getElementById('sqliteVersion').innerText = "Pronto";
+                console.log("SQL.js initialized");
+            } catch (e) {
+                console.error(e);
+                showError("Falha ao carregar motor SQLite.");
+            }
+        });
+
+        // --- Key Events ---
+        editor.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                runQuery();
+            }
+        });
+
+        // --- File Upload Logic ---
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            loadDatabase(file);
+        });
+
+        async function loadDatabase(file) {
+            if (!SQL) return;
+            showLoading(true);
+            
+            try {
+                const reader = new FileReader();
+                
+                // If it's a .sql file, we treat it as a script text
+                if (file.name.endsWith('.sql')) {
+                    reader.onload = function() {
+                        try {
+                            // Create new empty DB
+                            db = new SQL.Database();
+                            // Run the script
+                            db.run(reader.result);
+                            refreshTables();
+                            showStatus(`Script .sql executado com sucesso.`, true);
+                        } catch (err) {
+                            showError("Erro ao executar SQL Script: " + err.message);
+                        }
+                        showLoading(false);
+                    };
+                    reader.readAsText(file);
+                } 
+                // Otherwise assume binary sqlite file
+                else {
+                    reader.onload = function() {
+                        try {
+                            const uInt8Array = new Uint8Array(reader.result);
+                            db = new SQL.Database(uInt8Array);
+                            refreshTables();
+                            showStatus(`Banco carregado (${(file.size/1024).toFixed(1)} KB)`, true);
+                        } catch (err) {
+                            showError("Arquivo inválido ou corrompido.");
+                        }
+                        showLoading(false);
+                    };
+                    reader.readAsArrayBuffer(file);
+                }
+            } catch (e) {
+                showError("Erro de leitura: " + e.message);
+                showLoading(false);
+            }
+        }
+
+        function createDemoDB() {
+            if (!SQL) return;
+            showLoading(true);
+            setTimeout(() => {
+                db = new SQL.Database();
+                
+                db.run(`
+                    CREATE TABLE usuarios (id INTEGER PRIMARY KEY, nome TEXT, email TEXT, cargo TEXT, salario INTEGER);
+                    INSERT INTO usuarios VALUES (1, 'Ana Silva', 'ana@tech.com', 'Dev Frontend', 8500);
+                    INSERT INTO usuarios VALUES (2, 'Roberto Costa', 'beto@tech.com', 'Dev Backend', 9200);
+                    INSERT INTO usuarios VALUES (3, 'Carla Diaz', 'carla@tech.com', 'Product Manager', 12000);
+                    INSERT INTO usuarios VALUES (4, 'João Pedro', 'jp@tech.com', 'Estagiário', 2500);
+                    
+                    CREATE TABLE logs (id INTEGER PRIMARY KEY, evento TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);
+                    INSERT INTO logs (evento) VALUES ('Sistema iniciado');
+                    INSERT INTO logs (evento) VALUES ('Usuário logado');
+                `);
+                
+                refreshTables();
+                showStatus("Banco Demo criado.", true);
+                
+                // Run a default query
+                editor.value = "SELECT * FROM usuarios;";
+                runQuery();
+                showLoading(false);
+            }, 500);
+        }
+
+        // --- Core Logic ---
+        function refreshTables() {
+            const tableList = document.getElementById('tableList');
+            tableList.innerHTML = '';
+            
+            try {
+                // Get tables excluding internal sqlite tables
+                const stmt = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
+                while(stmt.step()) {
+                    const tableName = stmt.get()[0];
+                    
+                    const div = document.createElement('div');
+                    div.className = "group flex items-center gap-2 px-3 py-2 rounded-md hover:bg-surfaceHighlight cursor-pointer transition-colors text-textMuted hover:text-textMain";
+                    div.innerHTML = `<i data-lucide="table-2" class="w-4 h-4 text-primary opacity-70 group-hover:opacity-100"></i> <span class="truncate font-mono text-xs">${tableName}</span>`;
+                    div.onclick = () => {
+                        editor.value = `SELECT * FROM ${tableName} LIMIT 100;`;
+                        runQuery();
+                    }
+                    tableList.appendChild(div);
+                }
+                lucide.createIcons();
+            } catch (e) {
+                console.error("Erro ao listar tabelas", e);
+            }
+        }
+
+        function runQuery() {
+            if (!db) {
+                showError("Nenhum banco de dados carregado.");
+                return;
+            }
+
+            const sql = editor.value;
+            if (!sql.trim()) return;
+
+            showError(""); // Clear errors
+            document.getElementById('queryStats').innerText = "";
+            
+            const startTime = performance.now();
+
+            try {
+                const results = db.exec(sql);
+                const endTime = performance.now();
+                const timeTaken = (endTime - startTime).toFixed(1);
+
+                if (results.length === 0) {
+                    // Query OK, but no return (UPDATE, INSERT, DELETE)
+                    renderEmptyResult();
+                    showStatus(`Query executada em ${timeTaken}ms. Linhas afetadas: ${db.getRowsModified()}`, true);
+                } else {
+                    renderTable(results[0]);
+                    showStatus(`${results[0].values.length} resultados em ${timeTaken}ms`, true);
+                }
+            } catch (err) {
+                showError(err.message);
+            }
+        }
+
+        // --- Rendering ---
+        function renderTable(data) {
+            const container = document.getElementById('resultContainer');
+            const columns = data.columns;
+            const values = data.values;
+
+            let html = `
+                <table class="sql-table w-full text-left border-collapse">
+                    <thead>
+                        <tr>
+                            <th class="p-3 w-12 text-center text-xs font-mono border-b border-border text-textMuted bg-surface">#</th>
+                            ${columns.map(col => `<th class="p-3 text-xs font-mono font-bold border-b border-border text-textMain whitespace-nowrap">${col}</th>`).join('')}
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border/50 text-xs font-mono text-textMuted">
+            `;
+
+            values.forEach((row, index) => {
+                html += `<tr>
+                    <td class="p-2 text-center text-textMuted/50 border-r border-border/30 select-none">${index + 1}</td>
+                    ${row.map(cell => `<td class="p-2 whitespace-nowrap max-w-xs truncate hover:text-textMain hover:overflow-visible hover:whitespace-normal" title="${cell}">${cell === null ? '<span class="text-red-400/50 italic">null</span>' : escapeHtml(cell)}</td>`).join('')}
+                </tr>`;
+            });
+
+            html += `</tbody></table>`;
+            
+            // If lots of columns, ensure container scrolls
+            if(values.length === 0) {
+                 html = `<div class="p-10 text-center text-textMuted italic">A query retornou uma tabela vazia.</div>`;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderEmptyResult() {
+            const container = document.getElementById('resultContainer');
+            container.innerHTML = `
+                <div class="h-full flex flex-col items-center justify-center text-accent/80 select-none animate-pulse">
+                    <i data-lucide="check-circle" class="w-12 h-12 mb-4"></i>
+                    <p class="font-mono text-sm">Comando executado com sucesso.</p>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // --- Utilities ---
+        function exportDB() {
+            if (!db) return;
+            const data = db.export();
+            const blob = new Blob([data], {type: 'application/x-sqlite3'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `database_${new Date().getTime()}.sqlite`;
+            a.click();
+        }
+
+        function exportCSV() {
+            // Very basic CSV export of current table view
+            // Requires re-running the query or storing state. 
+            // For simplicity, we just alert here, but logic would involve converting the `results` object to CSV string.
+             if (!db) return;
+             alert("A exportação CSV seria implementada convertendo o array de resultados atual.");
+        }
+
+        function clearEditor() {
+            editor.value = "";
+            editor.focus();
+        }
+
+        function showStatus(msg, success = false) {
+            const el = document.getElementById('queryStats');
+            const errEl = document.getElementById('errorMsg');
+            errEl.classList.add('hidden');
+            el.innerText = msg;
+            el.className = success ? "text-xs text-accent font-mono" : "text-xs text-textMuted font-mono";
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('queryStats');
+            const errEl = document.getElementById('errorMsg');
+            el.innerText = "";
+            errEl.innerText = msg;
+            errEl.classList.remove('hidden');
+        }
+
+        function showLoading(isLoading) {
+            if(isLoading) loadingIndicator.classList.remove('hidden');
+            else loadingIndicator.classList.add('hidden');
+        }
+
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return text;
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        // Filter Tables
+        document.getElementById('tableSearch').addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            const items = document.getElementById('tableList').children;
+            for(let item of items) {
+                if(item.innerText.toLowerCase().includes(term)) {
+                    item.classList.remove('hidden');
+                } else {
+                    item.classList.add('hidden');
+                }
+            }
+        });
+
+    </script>
+</body>
+</html>
